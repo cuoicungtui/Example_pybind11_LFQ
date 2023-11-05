@@ -5,7 +5,7 @@ with open('README.md') as f:
 
 setup(
     name='msproteomics',
-    version='0.0.1',    
+    version='0.0.2',    
     description='A Python package for mass spectrometry-based proteomics data processing',
     url='https://github.com/tvpham/msproteomics',
     author='Thang Pham',
