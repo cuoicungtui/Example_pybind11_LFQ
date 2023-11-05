@@ -191,7 +191,7 @@ def maxLFQ(X):
         return dict({"estimate": None, "annotation": "NA"})
     # check number row
     if X.shape[0] == 1:
-        return dict({"estimate": X[1, ], "annotation": ""})
+        return dict({"estimate": X[0, ], "annotation": ""})
     
     N = X.shape[1]  # [row, col]
     cc = 0
