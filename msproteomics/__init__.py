@@ -400,6 +400,7 @@ def create_site_key(protein_ids, ptm_locations):
                         first = False
                     else:
                         all_sites[i] = all_sites[i] + ';' + a[j]
+                        first_sites[i] = first_sites[i] + ';' + a[j]
 
         
         if i % 100000 == 0:
@@ -421,7 +422,7 @@ def create_site_report_longformat(tab, keys):
     tab2 = tab.reset_index(drop = True)
     return(tab2.iloc[r].assign(site = ids))
 
-def create_site_report_wideformat(report_lf,
+def create_report_wideformat(report_lf,
                                   sample_id = "R.FileName",
                                   intensity_col = "log2_intensity",
                                   primary_id = 'site',
@@ -463,7 +464,7 @@ def create_site_report_wideformat(report_lf,
          
     a = list(report_lf[primary_id])
     ind = [a.index(x) for x in list(result['estimate'].index)]
-    tmp = report_lf[[primary_id] + ['all_sites'] + annotation_cols].iloc[ind]    
+    tmp = report_lf[[primary_id] + annotation_cols].iloc[ind]    
     ret = tmp.set_axis(result['estimate'].index).join(result['estimate'])
 
     return ret
@@ -495,3 +496,29 @@ def normalize(report_lf, sample_id, intensity_col):
 
     return int_log2
 
+def create_peptide_key(modified_sequence, 
+                       regex_str = '\[[^\\[]+\]',
+                       target_modification = '[Phospho (STY)]'):
+    import re
+
+    m = {i for s in modified_sequence for i in re.findall(regex_str, s)}
+
+    if target_modification in m:
+        m.remove(target_modification)
+        mods = [target_modification] + sorted(list(m))
+    else :
+        raise Exception('target modification not found.')
+
+    ptm_key = [''] * len(modified_sequence)
+    STY_count = [0] * len(modified_sequence)
+
+    from collections import Counter
+
+    for i, s in enumerate(modified_sequence):
+        a = Counter(re.findall(regex_str, s))
+        STY_count[i] = a[mods[0]]
+        ptm_key[i] = re.sub(regex_str, '', s) + '_' + str(STY_count[i])
+        for j in range(1, len(mods)):
+            ptm_key[i] += '.' + str(a[mods[j]])
+
+    return(ptm_key, STY_count)
