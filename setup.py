@@ -19,4 +19,13 @@ setup(
         'Intended Audience :: Science/Research',
 		'License :: OSI Approved :: Apache Software License',
     ],
+    install_requires=[    
+    'numpy',
+    'pandas',
+    'scipy',
+    'matplotlib'
+    ], 
+    entry_points = {
+        'console_scripts': ['phosphoreport=msproteomics.phosphoreport:main'],
+    }
 )

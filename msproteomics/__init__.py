@@ -13,15 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# With contributions from Truong Xuan Nam and others at Thuy Loi University.
+"""
+With contributions from Truong Xuan Nam and others at Thuy Loi University
+
+Kien, Luc: MaxLFQ in Python
+Quoc, Bao: C++ integration
+
+"""
 
 __version__ = '0.0.2'
 __author__ = 'Thang V Pham'
 
-import sys
 import numpy as np
 import pandas as pd
-import pyarrow
 from pandas.core.dtypes.common import is_numeric_dtype
 from scipy.linalg import lstsq
 from matplotlib import pyplot as plt
@@ -30,18 +34,20 @@ import matplotlib.cm as cm
 
 import re
 
+
 def read(file_path,
-         primary_id="PG.ProteinGroups",
-         secondary_id=np.array(["EG.ModifiedSequence", "FG.Charge", "F.FrgIon", "F.Charge"]),
-         sample_id="R.Condition",
-         intensity_col="F.PeakArea",
-         other_col=np.array(["F.ExcludedFromQuantification", "PG.Qvalue", "EG.Qvalue"])):
-    cols = np.concatenate(([primary_id],
-                              secondary_id,
-                              [sample_id],
-                              [intensity_col],
-                              other_col),
-                             axis=0)
+         primary_id_col = "PG.ProteinGroups",
+         secondary_id_cols = np.array(["EG.ModifiedSequence", "FG.Charge", "F.FrgIon", "F.Charge"]),
+         sample_id_col = "R.Condition",
+         intensity_col = "F.PeakArea",
+         other_cols = np.array(["F.ExcludedFromQuantification", "PG.Qvalue", "EG.Qvalue"])):
+    
+    cols = np.concatenate(([primary_id_col],
+                            secondary_id_cols,
+                            [sample_id_col],
+                            [intensity_col],
+                            other_cols),
+                            axis=0)
     return pd.read_csv(file_path,
                        delimiter="\t",
                        #usecols=cols,
@@ -49,25 +55,26 @@ def read(file_path,
 
 
 def preprocess(quant_table,
-               primary_id="PG.ProteinGroups",
-               secondary_id=np.array(["EG.ModifiedSequence", "FG.Charge", "F.FrgIon", "F.Charge"]),
-               sample_id="R.Condition",
-               intensity_col="F.PeakArea",
-               median_normalization=True,
-               log2_intensity_cutoff=0,
-               pdf_out="qc-plots.pdf",
-               pdf_width=12,
-               pdf_height=8):
+               primary_id_col = "PG.ProteinGroups",
+               secondary_id_cols = np.array(["EG.ModifiedSequence", "FG.Charge", "F.FrgIon", "F.Charge"]),
+               sample_id_col = "R.Condition",
+               intensity_col = "F.PeakArea",
+               median_normalization = True,
+               log2_intensity_cutoff = 0,
+               pdf_out = "qc-plots.pdf",
+               pdf_width = 12,
+               pdf_height = 8):
+
     if isinstance(quant_table, pd.DataFrame):
         if not is_numeric_dtype(quant_table[intensity_col]):
             raise TypeError("Intensity column must be numeric")
 
         print("Concatenating secondary ids...")
-        second_id = quant_table[secondary_id[0]]
-        for col in range(1, len(secondary_id)):
-            second_id += quant_table[secondary_id[col]].astype(str)
-        df = pd.DataFrame({'protein_list': quant_table[primary_id],
-                           'sample_list': quant_table[sample_id],
+        second_id = quant_table[secondary_id_cols[0]].astype(str)
+        for col in range(1, len(secondary_id_cols)):
+            second_id += quant_table[secondary_id_cols[col]].astype(str)
+        df = pd.DataFrame({'protein_list': quant_table[primary_id_col],
+                           'sample_list': quant_table[sample_id_col],
                            'quant': np.log2(quant_table[intensity_col]),
                            'id': second_id})
         df.dropna(axis=0)
@@ -150,8 +157,8 @@ def create_protein_list(preprocessed_data):
             
         proteins = preprocessed_data['protein_list'].unique()
         samples = preprocessed_data['sample_list'].unique()
-        print("Create protein list..")
-        print("#proteins = {0}, #samples = {1}".format(proteins.shape[0], samples.shape[0]))
+        print("Create quantification list..")
+        print("# rows = {0}, # columns = {1}".format(proteins.shape[0], samples.shape[0]))
         
         p_list = {}
         # progress display
@@ -163,7 +170,7 @@ def create_protein_list(preprocessed_data):
                 print('\r[{:}] {:.0%}'.format('#'*filled + ' '*(20-filled), i/proteins.shape[0]), end = '')
                 threes_display+=step
                 filled+=1
-        # progress display
+        
             tmp = preprocessed_data[preprocessed_data["protein_list"] == proteins[i]]
             if tmp.shape[0] > 0:
                 dupl = tmp[['id', 'sample_list']].duplicated()
@@ -176,11 +183,11 @@ def create_protein_list(preprocessed_data):
                     for j in tmp.index:
                         m.loc[tmp.at[j, 'id'], tmp.at[j, 'sample_list']] = tmp.at[j, 'quant']
                     p_list[proteins[i]] = m
-        print("Complete!!")
+        print('\r[{:}] 100% Complete.'.format('#'*20))
+        
         return p_list
     else:
         raise TypeError("preprocessed_data isn't pd.Dataframe")
-
 
 
 def maxLFQ(X):
@@ -195,24 +202,32 @@ def maxLFQ(X):
     
     N = X.shape[1]  # [row, col]
     cc = 0
-    g = np.full(N, np.nan)
+    g = np.full(N, 0, dtype = np.uint)
     
     def spread(i):
         g[i] = cc
         for r in range(X.shape[0]):
             if not np.isnan(X[r, i]):
                 for k in range(X.shape[1]):
-                    if (not np.isnan(X[r, k])) and np.isnan(g[k]):
+                    if (not np.isnan(X[r, k])) and (g[k] == 0):
                         spread(k)
+    
+    def nanmedian2(s):
+        if np.all(np.isnan(s)):
+            return np.nan
+        return np.nanmedian(s)
+
     # MaxLFQ
     def maxLFQdo(X):
+
         X = np.array(X)
         Ncol = X.shape[1]
         AtA = np.zeros((Ncol, Ncol))
         Atb = np.zeros(Ncol)
+
         for i in range(Ncol - 1):
             for j in range(i + 1, Ncol):
-                r_i_j = np.nanmedian(np.array(-X[:, i] + X[:, j]))
+                r_i_j = nanmedian2(np.array(-X[:, i] + X[:, j]))
                 if not np.isnan(r_i_j):
                     AtA[i, j] = AtA[j, i] = -1
                     AtA[i, i] = AtA[i, i] + 1
@@ -223,33 +238,38 @@ def maxLFQ(X):
 
         l = np.append(np.append(2*AtA, np.ones((Ncol, 1)), axis=1),
                       np.append(np.ones(Ncol), 0).reshape(1, Ncol+1),
-                      axis=0)
+                      axis=0)        
+
         r = np.append(2*Atb,
                       [np.nanmean(X)*Ncol],
                       axis=0).reshape((Ncol+1, 1))
+        
         x = np.linalg.solve(l, r)
+        
         return x.flatten()[:Ncol]
-       
+
     for i in range(N):
-        if np.isnan(g[i]):
+        if g[i] == 0:
             cc += 1
             spread(i)
-    
+
     w = np.full(N, np.nan)
     for i in range(cc):
-        ind = np.array(g == i + 1)
-        if sum(ind) == 1:
-            w[ind] = np.nanmedian(np.array(X[:,ind]))
+        ind = np.array(g == (i + 1))
+        if sum(ind) == 1:            
+            w[ind] = nanmedian2(np.array(X[:,ind]))            
         else:
-            w[ind] = maxLFQdo(X[:,ind])
-    
+            w[ind] = maxLFQdo(X[:,ind])        
+
     if np.all(np.isnan(w)):
         return dict({"estimate": w, "annotation": "NA"})
     else:
-        if np.all(g[~np.isnan(w)]):
+        g_quantified_samples = g[~np.isnan(w)]        
+        if np.all([g_quantified_samples[0] == x for x in g_quantified_samples]):                        
             return dict({"estimate": w, "annotation": ""})
-        else:
-            return dict({"estimate": w, "annotation": ";".join(np.put(g, np.nan, "NA"))})
+        else:        
+            g[np.isnan(w)] = 0
+            return dict({"estimate": w, "annotation": ";".join(['NA' if (x == 0) else str(x) for x in g])})
 
           
 def create_protein_table(protein_list, method = "maxLFQ"):
@@ -260,9 +280,8 @@ def create_protein_table(protein_list, method = "maxLFQ"):
         return None
 
     tab = pd.DataFrame(None, columns=list(protein_list.values())[0].columns, index=list(protein_list))
-    annotation = pd.Series(np.full(len(protein_list), np.nan))
-    
-
+    annotation = pd.DataFrame('', columns= ['MaxLFQ_annotation'], index=list(protein_list))
+        
     # progress display
     nrow = tab.shape[0]
     threes_display = 0
@@ -281,10 +300,12 @@ def create_protein_table(protein_list, method = "maxLFQ"):
             raise Exception("Unknown method: ", method)
 
         tab.iloc[i, :] = out['estimate']
-        annotation[i] = out['annotation']
+        annotation.iloc[i, 0] = out['annotation']
 
-    print(" Complete!!")
+    print('\r[{:}] 100% Complete.'.format('#'*20))
+    
     return dict({"estimate": tab, "annotation": annotation})
+
 
 def plot_protein(X, 
                  main = "", 
@@ -294,9 +315,6 @@ def plot_protein(X,
     if col == []:
         for i in range(1, X.shape[0]):
             col.append(i)
-
-    # if split is not None:
-    #     old_par =    
 
     plt.close('all')
     X = X.to_numpy()
@@ -318,13 +336,14 @@ def plot_protein(X,
         j += 1
     plt.show() 
 
+
 def extract_annotation(protein_ids, 
                        quant_table,
-                       primary_id = "PG.ProteinGroups",
+                       primary_id_col = "PG.ProteinGroups",
                        annotation_columns = None):
     
     #concatenate input columns
-    all_columns = np.concatenate(([primary_id], annotation_columns), axis = 0) 
+    all_columns = np.concatenate(([primary_id_col], annotation_columns), axis = 0) 
 
     #get column name of input data 
     colnames, index = [], []
@@ -343,8 +362,8 @@ def extract_annotation(protein_ids,
         raise Exception("The input table has no column")
 
     for i in range(len(protein_ids)):
-        if(protein_ids[i] in quant_table[primary_id]):
-            index.append(quant_table[primary_id].index(protein_ids[i]))
+        if(protein_ids[i] in quant_table[primary_id_col]):
+            index.append(quant_table[primary_id_col].index(protein_ids[i]))
         else:
             index.append(None)
 
@@ -352,8 +371,8 @@ def extract_annotation(protein_ids,
         raise Exception("Cannot find")
 
     #get rows index of column in all_columns    
-    ind = [quant_table[primary_id].index(x) for x in protein_ids]
-    tab = quant_table[np.concatenate(([primary_id], annotation_columns), axis = 0)].iloc[ind]
+    ind = [quant_table[primary_id_col].index(x) for x in protein_ids]
+    tab = quant_table[np.concatenate(([primary_id_col], annotation_columns), axis = 0)].iloc[ind]
     
     return(tab)
 
@@ -361,19 +380,16 @@ def extract_annotation(protein_ids,
 def create_site_key(protein_ids, ptm_locations):
     n = len(protein_ids)
     
-    all_sites = [''] * n
-    
-    secondary_keys = [''] * n
-    
+    all_sites = [''] * n   
+    secondary_keys = [''] * n    
     first_sites = [''] * n
     
     for i in range(n):
         
         pp = protein_ids[i].split(';')
-
         ss = ptm_locations[i].split(';')
-        
-        if len(pp) > 0 :
+                
+        if len(pp) > 0 and len(pp) == len(ss):
             a = [''] * len(pp)
             for j in range(len(pp)):
                 p = pp[j]
@@ -389,8 +405,7 @@ def create_site_key(protein_ids, ptm_locations):
                         tmp = [p + '_' + rr + '_M' + str(min(len(r), 3)) for rr in r]
                         b[k] = ';'.join(tmp)                                    
                 a[j] = ';'.join(b)
-                        
-            
+                                    
             first = True
             for j in range(len(pp)):
                 if pp[j] != '' and a[j] != '':
@@ -401,16 +416,13 @@ def create_site_key(protein_ids, ptm_locations):
                     else:
                         all_sites[i] = all_sites[i] + ';' + a[j]
                         first_sites[i] = first_sites[i] + ';' + a[j]
-
-        
-        if i % 100000 == 0:
-            print(int(i * 100.0 / n), '%\n')        
-    
+            
     unique_sites = {y for x in all_sites for y in x.split(';')}
     
     unique_first_sites = {y for x in first_sites for y in x.split(';')}
 
     return(all_sites, unique_sites, first_sites, unique_first_sites)
+
 
 def create_site_report_longformat(tab, keys):
     
@@ -422,34 +434,33 @@ def create_site_report_longformat(tab, keys):
     tab2 = tab.reset_index(drop = True)
     return(tab2.iloc[r].assign(site = ids))
 
+
 def create_report_wideformat(report_lf,
-                                  sample_id = "R.FileName",
-                                  intensity_col = "log2_intensity",
-                                  primary_id = 'site',
-                                  secondary_id = ["EG.PrecursorId", "EG.Library", "FG.Charge", "F.FrgIon", "F.Charge", "F.FrgLossType"],
-                                  annotation_cols = ["PG.Organisms"],
-                                  method = "maxLFQ",
-                                  check_uniqueness = False):
+                             sample_id_col = "R.FileName",
+                             intensity_col = "log2_intensity",
+                             primary_id = 'site',
+                             secondary_id_cols = ["EG.PrecursorId", "EG.Library", "FG.Charge", "F.FrgIon", "F.Charge", "F.FrgLossType"],
+                             annotation_cols = ["PG.Organisms"],
+                             method = "maxLFQ",
+                             check_uniqueness = False):
     
     print("Concatenating secondary ids...")
-    second_id = report_lf[secondary_id[0]]
-    for col in range(1, len(secondary_id)):
-        second_id += ':' + report_lf[secondary_id[col]].astype(str)
+    second_id = report_lf[secondary_id_cols[0]].astype(str)
+    for col in range(1, len(secondary_id_cols)):
+        second_id += ':' + report_lf[secondary_id_cols[col]].astype(str)
 
     aa = pd.DataFrame({'protein_list': report_lf[primary_id].copy(),
-                       'sample_list': report_lf[sample_id].copy(),
+                       'sample_list': report_lf[sample_id_col].copy(),
                        'quant': report_lf[intensity_col].copy(),
                        'id': second_id.copy()})
     aa.dropna(axis=0)
     
-
     if method == 'maxLFQ':
-        #res = fast_MaxLFQ(aa)
-    
+        #res = fast_MaxLFQ(aa)    
         p_list = create_protein_list(aa)        
         result = create_protein_table(p_list, method = 'maxLFQ')
         
-        # check difference    
+        # check difference here
 
     elif method == 'sum':        
         p_list = create_protein_list(aa)
@@ -464,15 +475,20 @@ def create_report_wideformat(report_lf,
          
     a = list(report_lf[primary_id])
     ind = [a.index(x) for x in list(result['estimate'].index)]
-    tmp = report_lf[[primary_id] + annotation_cols].iloc[ind]    
-    ret = tmp.set_axis(result['estimate'].index).join(result['estimate'])
+
+    tmp = report_lf[[primary_id] + annotation_cols].iloc[ind]        
+    tmp = tmp.set_axis(result['estimate'].index, axis='index')
+    if method == 'maxLFQ':                
+        ret = tmp.join(result['annotation']).join(result['estimate'])
+    else:
+        ret = tmp.join(result['estimate'])
 
     return ret
 
 
-def normalize(report_lf, sample_id, intensity_col):
+def normalize(report_lf, sample_id_col, intensity_col):
     
-    s = set(report_lf[sample_id])
+    s = set(report_lf[sample_id_col])
     print(len(s) , " samples:")
     for si in s:
         print(si)
@@ -480,7 +496,7 @@ def normalize(report_lf, sample_id, intensity_col):
     int_log2 = np.log2(report_lf[intensity_col],  out = np.zeros_like(report_lf[intensity_col]), where = (report_lf[intensity_col] != 0))
     print(sum(np.isnan(int_log2)), " NA(s).")
     
-    m = {si: np.median(int_log2[report_lf[sample_id] == si]) for si in s}
+    m = {si: np.median(int_log2[report_lf[sample_id_col] == si]) for si in s}
         
     sm = 0
     for i in m:
@@ -491,23 +507,28 @@ def normalize(report_lf, sample_id, intensity_col):
         m[i] = sm - m[i]
         
     for i in m:
-        idx = report_lf[sample_id] == i
+        idx = report_lf[sample_id_col] == i
         int_log2[idx] = int_log2[idx] + m[i]
 
     return int_log2
 
+
 def create_peptide_key(modified_sequence, 
                        regex_str = '\[[^\\[]+\]',
-                       target_modification = '[Phospho (STY)]'):
+                       target_modification = '[Phospho (STY)]',
+                       modifications = None):
     import re
 
-    m = {i for s in modified_sequence for i in re.findall(regex_str, s)}
+    if modifications is None:
+        m = {i for s in modified_sequence for i in re.findall(regex_str, s)}
 
-    if target_modification in m:
-        m.remove(target_modification)
-        mods = [target_modification] + sorted(list(m))
-    else :
-        raise Exception('target modification not found.')
+        if target_modification in m:
+            m.remove(target_modification)
+            mods = [target_modification] + sorted(list(m))
+        else :
+            raise Exception('target modification not found.')
+    else:
+        mods = modifications
 
     ptm_key = [''] * len(modified_sequence)
     STY_count = [0] * len(modified_sequence)
