@@ -34,7 +34,6 @@ import matplotlib.cm as cm
 
 import re
 
-
 def read(file_path,
          primary_id_col = "PG.ProteinGroups",
          secondary_id_cols = np.array(["EG.ModifiedSequence", "FG.Charge", "F.FrgIon", "F.Charge"]),
